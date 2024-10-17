@@ -1,75 +1,60 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ImageLike } from 'tesseract.js';
+import { Send, Upload, RefreshCw } from 'lucide-react';
 
 const OcrAiAnalyzer = () => {
   const [result, setResult] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [dragActive, setDragActive] = useState(false);
-  const [aiResponse, setAiResponse] = useState('');
+  const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
+  const [currentMessage, setCurrentMessage] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState('');
+  const [activeTab, setActiveTab] = useState('extracted');
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef(null);
 
-  // Initialize Tesseract on component mount
-  useEffect(() => {
-    const loadTesseract = async () => {
-      try {
-        await import('tesseract.js');
-      } catch (err) {
-        setError('Failed to load OCR library');
-        console.error('Error loading Tesseract:', err);
-      }
-    };
-    loadTesseract();
-  }, []);
-
-  const analyzeWithMixtral = async (text: string) => {
-    setAiLoading(true);
-    setAiError('');
-    
-    try {
-      const response = await fetch('https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${import.meta.env.VITE_HUGGING_FACE_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          inputs: `<s>[INST]Analyze this resume and provide:
-                    1. Key qualifications and skills
-                    2. Notable experience highlights
-                    3. Areas for improvement
-                    4. Overall assessment
-
-                    Resume text:
-                    ${text}[/INST]</s>`,
-          parameters: {
-            max_new_tokens: 1024,
-            temperature: 0.4,
-            top_p: 0.95,
-            return_full_text: false
-          }
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`API request failed: ${errorData.error || response.status}`);
-      }
-
-      const data = await response.json();
-      // Handle both array and direct response formats
-      const generatedText = Array.isArray(data) ? data[0].generated_text : data.generated_text;
-      setAiResponse(generatedText);
-    } catch (err) {
-      setAiError('Failed to analyze the text with AI. Please try again.');
-      console.error('AI analysis error:', err);
-    } finally {
-      setAiLoading(false);
-    }
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const handleFile = async (file: ImageLike) => {
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  // Process PDF files
+  const processPdf = async (file: Blob) => {
+    const fileReader = new FileReader();
+    
+    return new Promise((resolve, reject) => {
+      fileReader.onload = async () => {
+        try {
+          if (fileReader.result) {
+            const typedArray = new Uint8Array(fileReader.result as ArrayBuffer);
+          const { getDocument } = await import('pdfjs-dist');
+          const pdf = await getDocument(typedArray).promise;
+          let fullText = '';
+          
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items
+              .map(item => ('str' in item ? item.str : ''))
+              .join(' ');
+            fullText += pageText + '\n';
+          }
+          
+          resolve(fullText);
+          }
+        } catch (err) {
+          reject(err);
+        }
+      };
+      fileReader.readAsArrayBuffer(file);
+    });
+  };
+
+  const handleFile = async (file: File) => {
     if (!file) return;
 
     const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf'];
@@ -82,33 +67,97 @@ const OcrAiAnalyzer = () => {
       setLoading(true);
       setError('');
       setResult('');
-      setAiResponse('');
+      setMessages([]);
 
-      const { createWorker } = await import('tesseract.js');
-      const worker = await createWorker();
+      let extractedText = '';
       
-      // Remove deprecated calls to loadLanguage and initialize
-      const { data: { text } } = await worker.recognize(file);
-      await worker.terminate();
+      if (file.type === 'application/pdf') {
+        extractedText = await processPdf(file) as string;
+      } else {
+        const { createWorker } = await import('tesseract.js');
+        const worker = await createWorker();
+        const { data: { text } } = await worker.recognize(file);
+        await worker.terminate();
+        extractedText = text;
+      }
 
       // Clean up the extracted text
-      const cleanedText = text
-        .replace(/\f/g, '') // Remove form feed characters
-        .replace(/(\r\n|\n|\r){3,}/g, '\n\n') // Replace multiple newlines with double newlines
+      const cleanedText = extractedText
+        .replace(/\f/g, '')
+        .replace(/(\r\n|\n|\r){3,}/g, '\n\n')
         .trim();
 
       setResult(cleanedText);
-      // Automatically analyze the extracted text with Mixtral
-      await analyzeWithMixtral(cleanedText);
+      
+      // Initial AI analysis
+      await analyzeWithMixtral(cleanedText, true);
     } catch (err) {
       setError('Failed to process the file');
-      console.error('OCR error:', err);
+      console.error('Processing error:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDrop = async (e: { preventDefault: () => void; dataTransfer: { files: any[]; }; }) => {
+  const analyzeWithMixtral = async (text: string, isInitial = false) => {
+    setAiLoading(true);
+    
+    try {
+      const prompt = isInitial 
+        ? `Analyze if this is a resume and provide the following details, else say 'it is not a resume':
+           1. Key qualifications and skills
+           2. Notable experience highlights
+           3. Areas for improvement
+           4. Overall assessment`
+        : currentMessage;
+
+      const response = await fetch('https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${import.meta.env.VITE_HUGGING_FACE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          inputs: `<s>[INST]${prompt}\n\nContext from resume:\n${text}[/INST]</s>`,
+          parameters: {
+            max_new_tokens: 1024,
+            temperature: 0.4,
+            top_p: 0.95,
+            return_full_text: false
+          }
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const generatedText = Array.isArray(data) ? data[0].generated_text : data.generated_text;
+      
+      setMessages(prev => [...prev, 
+        { role: 'user', content: isInitial ? 'Please analyze my resume' : currentMessage },
+        { role: 'assistant', content: generatedText }
+      ]);
+      
+      if (!isInitial) {
+        setCurrentMessage('');
+      }
+    } catch (err) {
+      setError('Failed to analyze with AI. Please try again.');
+      console.error('AI analysis error:', err);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleSendMessage = async (e: { preventDefault: () => void; }) => {
+    e.preventDefault();
+    if (!currentMessage.trim() || !result) return;
+    await analyzeWithMixtral(result);
+  };
+
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setDragActive(false);
     const file = e.dataTransfer?.files[0];
@@ -125,86 +174,145 @@ const OcrAiAnalyzer = () => {
     setDragActive(false);
   };
 
-  const handleFileInput = async (e: { target: { files: any[]; }; }) => {
-    const file = e.target.files?.[0];
-    await handleFile(file);
-  };
+  const handleFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        await handleFile(file);
+      }
+    };
 
   return (
-    <div className="w-full max-w-[85%] mx-auto my-auto p-6 bg-gray-900 text-gray-200">
-      <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold mb-2">AI Resume Analyzer</h1>
-        <p className="text-gray-400">Upload your resume for OCR and AI analysis</p>
-      </div>
-
-      <div
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
-          ${dragActive ? 'border-blue-500 bg-blue-800' : 'border-gray-600 hover:border-gray-500'}`}
-      >
-        <input
-          type="file"
-          onChange={handleFileInput}
-          accept="image/*,.pdf"
-          className="hidden"
-          id="file-upload"
-        />
-        <label htmlFor="file-upload" className="cursor-pointer">
-          <div className="space-y-4">
-            <div className="text-5xl">📄</div>
-            <p className="text-gray-300">
-              Drag and drop your resume here or click to browse
-            </p>
-            <p className="text-sm text-gray-500">
-              Supports images (JPG, PNG, GIF) and PDF files
-            </p>
-          </div>
-        </label>
-      </div>
-
-      {(loading || aiLoading) && (
-        <div className="mt-6 text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"></div>
-          <p className="mt-2 text-gray-400">
-            {loading ? 'Processing your file...' : 'Analyzing with AI...'}
-          </p>
-        </div>
-      )}
-
-      {error && (
-        <div className="mt-6 p-4 bg-red-600 text-red-100 rounded-lg">
-          {error}
-        </div>
-      )}
-
-      <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
-        {result && (
-          <div>
-            <h2 className="text-xl font-semibold mb-4">Extracted Text:</h2>
-            <div className="bg-gray-800 rounded-lg p-6 overflow-auto max-h-96">
-              <pre className="whitespace-pre-wrap font-mono text-sm text-gray-200">{result}</pre>
-            </div>
-          </div>
-        )}
-
-        {aiResponse && (
-          <div>
-            <h2 className="text-xl font-semibold mb-4">AI Analysis:</h2>
-            <div className="bg-gray-800 rounded-lg p-6 overflow-auto max-h-96">
-              <div className="prose prose-invert max-w-none">
-                {aiResponse.split('\n').map((line, index) => (
-                  <p key={index} className="mb-2">{line}</p>
-                ))}
+    <div className="w-full max-w-6xl mx-auto my-8 bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+      <div className="p-6">
+        <h1 className="text-3xl font-bold text-center mb-6">AI Resume Analyzer & Assistant</h1>
+        
+        {/* File Upload Section */}
+        <div
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
+            ${dragActive ? 'border-blue-500 bg-blue-50 dark:bg-blue-900' : 'border-gray-300 dark:border-gray-700'}`}
+        >
+          <input
+            type="file"
+            onChange={handleFileInput}
+            accept="image/*,.pdf"
+            className="hidden"
+            id="file-upload"
+            ref={fileInputRef}
+          />
+          <label htmlFor="file-upload" className="cursor-pointer">
+            <div className="space-y-4">
+              <Upload className="mx-auto h-12 w-12 text-gray-400" />
+              <div className="space-y-2">
+                <p className="text-base">
+                  Drag and drop your resume here or click to browse
+                </p>
+                <p className="text-sm text-gray-500">
+                  Supports PDF, JPG, PNG, and GIF files
+                </p>
               </div>
             </div>
+          </label>
+        </div>
+
+        {/* Loading State */}
+        {(loading || aiLoading) && (
+          <div className="flex items-center justify-center gap-2 mt-4">
+            <RefreshCw className="h-5 w-5 animate-spin" />
+            <span>{loading ? 'Processing file...' : 'AI is thinking...'}</span>
           </div>
         )}
 
-        {aiError && (
-          <div className="mt-6 p-4 bg-red-600 text-red-100 rounded-lg">
-            {aiError}
+        {/* Error Display */}
+        {error && (
+          <div className="mt-4 p-4 bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-100 rounded-lg">
+            {error}
+          </div>
+        )}
+
+        {/* Content Tabs */}
+        {result && (
+          <div className="mt-6">
+            <div className="flex border-b">
+              <button
+                className={`px-4 py-2 font-medium ${
+                  activeTab === 'extracted'
+                    ? 'border-b-2 border-blue-500 text-blue-600'
+                    : 'text-gray-500'
+                }`}
+                onClick={() => setActiveTab('extracted')}
+              >
+                Extracted Text
+              </button>
+              <button
+                className={`px-4 py-2 font-medium ${
+                  activeTab === 'chat'
+                    ? 'border-b-2 border-blue-500 text-blue-600'
+                    : 'text-gray-500'
+                }`}
+                onClick={() => setActiveTab('chat')}
+              >
+                AI Assistant
+              </button>
+            </div>
+
+            <div className="mt-4">
+              {activeTab === 'extracted' ? (
+                <div className="h-[400px] overflow-auto border rounded-lg p-4">
+                  <pre className="whitespace-pre-wrap font-mono text-sm text-gray-200">{result}</pre>
+                </div>
+              ) : (
+                <div className="h-[400px] flex flex-col">
+                  <div className="flex-1 overflow-auto p-4">
+                    <div className="space-y-4">
+                      {messages.map((message, index) => (
+                        <div
+                          key={index}
+                          className={`flex ${
+                            message.role === 'user' ? 'justify-end' : 'justify-start'
+                          }`}
+                        >
+                          <div
+                            className={`max-w-[80%] rounded-lg p-3 ${
+                              message.role === 'user'
+                                ? 'bg-blue-500 text-white'
+                                : 'bg-gray-100 dark:bg-gray-700'
+                            }`}
+                          >
+                            <pre className="whitespace-pre-wrap font-mono text-sm text-gray-200">{message.content}</pre>
+                          </div>
+                        </div>
+                      ))}
+                      <div ref={messagesEndRef} />
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleSendMessage} className="flex gap-2 p-4 border-t">
+                    <input
+                      type="text"
+                      value={currentMessage}
+                      onChange={(e) => setCurrentMessage(e.target.value)}
+                      placeholder="Ask about your resume..."
+                      disabled={!result || aiLoading}
+                      className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!result || aiLoading}
+                      className="px-4 py-2 bg-blue-500 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {aiLoading ? (
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
+                    </button>
+                  </form>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
