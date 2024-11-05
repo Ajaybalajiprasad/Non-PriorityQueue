@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from '@remix-run/react';
+import { Link, useNavigate } from '@remix-run/react';
 
 const Preview = () => {
   const texts = [
@@ -10,6 +10,7 @@ const Preview = () => {
   ];
 
   const [currentIndex, setCurrentIndex] = useState(0);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -38,7 +39,7 @@ const Preview = () => {
           </nav>
           <div className="space-x-4">
             <button className="px-4 py-2 rounded hover:bg-teal-700">LOG IN</button>
-            <button className="px-4 py-2 bg-white text-black rounded hover:bg-gray-100">GET STARTED</button>
+            <button className="px-4 py-2 bg-white text-black rounded hover:bg-gray-100" onClick={() => navigate('/ocr')}>GET STARTED</button>
           </div>
         </header>
         
@@ -54,7 +55,10 @@ const Preview = () => {
               Showcase your work online with a portfolio website. Get started with a
               professionally designed template that can be customized to fit your brand.
             </p>
-            <button className="px-8 py-4 bg-white text-black text-lg font-semibold rounded hover:bg-gray-100">
+            <button 
+              className="px-8 py-4 bg-white text-black text-lg font-semibold rounded hover:bg-gray-100"
+              onClick={() => navigate('/ocr')}
+            >
               GET STARTED
             </button>
           </div>
