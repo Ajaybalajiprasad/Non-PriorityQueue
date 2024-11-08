@@ -3,10 +3,10 @@ import { Link, useNavigate } from '@remix-run/react';
 
 const Preview = () => {
   const texts = [
-    "Sexy as Shreehari",
-    "Black as Nigga",
-    "Skiny as skeleton",
-    "White as Tharkuri"
+    "Resume in, portfolio out.",
+    "JSON-rich, templates stout.",
+    "Custom domain, no doubt.",
+    "Smooth as silk—let’s geek it out!"
   ];
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -39,7 +39,7 @@ const Preview = () => {
           </nav>
           <div className="space-x-4">
             <button className="px-4 py-2 rounded hover:bg-teal-700">LOG IN</button>
-            <button className="px-4 py-2 bg-white text-black rounded hover:bg-gray-100" onClick={() => navigate('/ocr')}>GET STARTED</button>
+            <button className="px-4 py-2 bg-white text-black rounded hover:bg-gray-100" onClick={() => navigate('/uploads')}>Upload</button>
           </div>
         </header>
         
@@ -57,9 +57,9 @@ const Preview = () => {
             </p>
             <button 
               className="px-8 py-4 bg-white text-black text-lg font-semibold rounded hover:bg-gray-100"
-              onClick={() => navigate('/ocr')}
+              onClick={() => navigate('/uploads')}
             >
-              GET STARTED
+              Upload Resume
             </button>
           </div>
         </main>

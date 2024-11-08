@@ -18,7 +18,7 @@ export default function FileUpload({ onProcessComplete }: FileUploadProps) {
         type="file"
         accept=".pdf,.jpg,.png"
         onChange={handleFileChange}
-        className="file-input"
+        className="file-input"  
       />
     </div>
   );
