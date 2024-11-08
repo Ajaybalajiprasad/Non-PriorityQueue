@@ -3,10 +3,10 @@ import { Link, useNavigate } from '@remix-run/react';
 
 const Preview = () => {
   const texts = [
-    "Resume in, portfolio out.",
-    "JSON-rich, templates stout.",
-    "Custom domain, no doubt.",
-    "Smooth as silk—let’s geek it out!"
+    "Resume in portfolio out",
+    "JSON-rich templates stout",
+    "Custom domain no doubt",
+    "Smooth as silk geek it out!"
   ];
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -64,7 +64,7 @@ const Preview = () => {
           </div>
         </main>
 
-        <div className="absolute top-[50%] left-[60%] transform -translate-x-1/2 -translate-y-1/2 text-teal-700 text-2xl font-bold space-y-1">
+        <div className="absolute ml-6 top-[50%] left-[60%] transform -translate-x-1/2 -translate-y-1/2 text-teal-700 text-2xl font-bold space-y-1">
           {texts.map((text, index) => (
             <div key={index} className={index === currentIndex ? "underline opacity-65" : "opacity-45"}>
               {text}
